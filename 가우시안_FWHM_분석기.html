@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>가우시안 FWHM 분석기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+<style>
+  :root{
+    --panel:#EEF1EF;
+    --panel-deep:#E2E6E3;
+    --ink:#122023;
+    --ink-soft:#4C5B5D;
+    --line:#C7CFC9;
+    --accent:#1B6E67;
+    --accent-soft:#DCEAE8;
+    --amber:#C97A1A;
+    --danger:#B0472F;
+    --paper:#F7F8F6;
+    --mono:'IBM Plex Mono', 'Consolas', monospace;
+    --sans:'IBM Plex Sans', 'Pretendard', -apple-system, sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      linear-gradient(var(--line) 1px, transparent 1px) 0 0/100% 28px,
+      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0/28px 100%,
+      var(--paper);
+    background-attachment:fixed;
+    background-blend-mode:multiply;
+    font-family:var(--sans);
+    color:var(--ink);
+    padding:20px;
+    min-height:100vh;
+  }
+  .device{
+    max-width:1180px;
+    margin:0 auto;
+    background:var(--panel);
+    border:1px solid var(--line);
+    box-shadow:0 1px 0 #fff inset, 0 18px 40px -24px rgba(18,32,35,0.35);
+  }
+  .device-header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    padding:16px 22px;
+    border-bottom:1px solid var(--line);
+    background:
+      repeating-linear-gradient(135deg, rgba(18,32,35,0.035) 0 2px, transparent 2px 10px);
+  }
+  .device-header h1{
+    font-size:17px;
+    letter-spacing:0.02em;
+    margin:0;
+    font-weight:700;
+  }
+  .device-header .tag{
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--ink-soft);
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+  }
+  .module{
+    border-bottom:1px solid var(--line);
+    padding:16px 22px;
+  }
+  .module:last-child{border-bottom:none;}
+  .module-label{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--accent);
+    font-weight:600;
+    margin-bottom:10px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .module-label::before{content:'';width:6px;height:6px;background:var(--accent);display:inline-block;}
+  .module-label .count{color:var(--ink-soft); font-weight:400;}
+
+  .row{display:flex; align-items:center; flex-wrap:wrap; gap:10px;}
+
+  button{
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:12.5px;
+    padding:8px 14px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    cursor:pointer;
+    letter-spacing:0.01em;
+  }
+  button:hover{background:var(--accent); border-color:var(--accent);}
+  button.secondary{
+    background:transparent;
+    color:var(--ink);
+    border:1px solid var(--line);
+  }
+  button.secondary:hover{border-color:var(--ink); background:var(--panel-deep);}
+  button:disabled{opacity:0.35; cursor:not-allowed; background:var(--ink); border-color:var(--ink);}
+  button.primary{background:var(--accent); border-color:var(--accent);}
+  button.primary:hover{background:#155753; border-color:#155753;}
+
+  input[type=text], input[type=number]{
+    font-family:var(--mono);
+    font-size:12.5px;
+    padding:7px 8px;
+    border:1px solid var(--line);
+    background:#fff;
+    width:88px;
+    color:var(--ink);
+  }
+  input[type=text]:focus, input[type=number]:focus{outline:2px solid var(--accent); outline-offset:1px;}
+  label.field-label{font-size:12px; color:var(--ink-soft); white-space:nowrap;}
+  .hint{font-size:11px; color:var(--ink-soft); font-family:var(--mono);}
+
+  #fileInput{display:none;}
+
+  .filelist{
+    margin-top:10px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    max-height:150px;
+    overflow-y:auto;
+  }
+  .file-row{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    padding:6px 8px;
+    background:#fff;
+    border:1px solid var(--line);
+    font-family:var(--mono);
+    font-size:12px;
+  }
+  .file-row .range-inputs{display:flex; align-items:center; gap:4px; flex:none;}
+  .file-row .range-inputs input{
+    width:58px; padding:4px 5px; font-size:11px;
+    border:1px solid var(--line); font-family:var(--mono);
+  }
+  .file-row .range-inputs input.overridden{border-color:var(--accent); background:var(--accent-soft);}
+  .file-row .range-sep{color:var(--ink-soft); font-size:11px;}
+  .swatch{width:11px;height:11px;flex:none; border:1px solid rgba(0,0,0,0.25);}
+  .file-row .fname{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .file-row input[type=checkbox]{margin:0;}
+  .empty-note{font-family:var(--mono); font-size:11.5px; color:var(--ink-soft); padding:8px 2px;}
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-family:var(--mono);
+    font-size:12px;
+    background:#fff;
+  }
+  thead th{
+    text-align:center;
+    font-weight:600;
+    background:var(--panel-deep);
+    padding:8px 6px;
+    border:1px solid var(--line);
+    letter-spacing:0.02em;
+    font-family:var(--sans);
+    font-size:11px;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  tbody td{
+    text-align:center;
+    padding:7px 6px;
+    border:1px solid var(--line);
+  }
+  tbody tr:nth-child(even){background:#FBFBF9;}
+  .table-empty{padding:16px; text-align:center; color:var(--ink-soft); font-family:var(--mono); font-size:12px;}
+
+  .toggle-group{display:flex; border:1px solid var(--ink);}
+  .toggle-btn{
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:12px;
+    padding:7px 13px;
+    border:none;
+    background:#fff;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .toggle-btn + .toggle-btn{border-left:1px solid var(--ink);}
+  .toggle-btn.active{background:var(--ink); color:var(--paper);}
+  .toggle-btn:hover:not(.active){background:var(--panel-deep);}
+
+  .switch-btn{
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:12px;
+    padding:7px 13px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .switch-btn:hover{border-color:var(--ink); background:var(--panel-deep);}
+  .switch-btn.active{background:var(--accent); border-color:var(--accent); color:var(--paper);}
+  .switch-btn.active:hover{background:#155753; border-color:#155753;}
+
+  #plotArea{
+    width:100%;
+    height:460px;
+    background:#fff;
+    border:1px solid var(--line);
+  }
+
+  .status{
+    font-family:var(--mono);
+    font-size:11.5px;
+    margin-top:8px;
+    padding:8px 10px;
+    border-left:3px solid var(--accent);
+    background:var(--accent-soft);
+    color:#0F3F3B;
+    display:none;
+  }
+  .status.show{display:block;}
+  .status.warn{border-color:var(--amber); background:#F7EBDA; color:#6B4A0E;}
+  .status.err{border-color:var(--danger); background:#F6DFDA; color:#7A2A1B;}
+</style>
+</head>
+<body>
+<div class="device">
+
+  <div class="device-header">
+    <h1>가우시안 FWHM 분석기</h1>
+    <span class="tag">Web Edition — Multi-file batch</span>
+  </div>
+
+  <div class="module">
+    <div class="module-label">01 — 파일</div>
+    <div class="row">
+      <button id="btnAdd">파일 추가</button>
+      <input type="file" id="fileInput" accept=".txt,.csv" multiple>
+      <label class="field-label" style="margin-left:14px;">시작 구간(nm)</label>
+      <input type="number" id="fitMin" placeholder="min" step="0.5">
+      <span style="color:var(--ink-soft);">~</span>
+      <input type="number" id="fitMax" placeholder="max" step="0.5">
+      <span class="hint">(비우면 자동 감지 · 뚜렷한 봉우리는 시작값을 넉넉히 잡아도 폭에 맞춰 스스로 좁혀집니다. 배경이 휘어진 약한 봉우리는 여전히 시작 구간을 좁고 정확하게 잡아야 안정적입니다 — 결과표의 ⚠ 표시 참고)</span>
+    </div>
+    <div class="filelist" id="fileList"></div>
+    <div class="hint" id="fileListHint" style="margin-top:6px; display:none;">
+      파일 옆 min~max 칸은 그 파일만의 "시작 구간"입니다. 구간이 원래 봉우리보다 넓으면 피팅이 스스로 좁혀 수렴하지만, 더 넓게는 벗어나지 않습니다 — 그래서 엉뚱한 스파이크로 튀는 대신, 시작 구간을 잘못 잡으면 결과표에 ⚠ 로 표시됩니다. 비워두면 위 기본 시작 구간(또는 자동 감지)을 따릅니다.
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="secondary" id="btnRemove">선택 삭제</button>
+      <button class="secondary" id="btnClear">전체 지우기</button>
+    </div>
+  </div>
+
+  <div class="module">
+    <div class="module-label">02 — 분석</div>
+    <div class="row">
+      <button class="primary" id="btnAnalyze">분석 실행</button>
+      <button class="secondary" id="btnSave">이미지 저장 (JPG)</button>
+    </div>
+    <div class="status" id="statusBox"></div>
+  </div>
+
+  <div class="module">
+    <div class="module-label">03 — 결과 <span class="count" id="resultCount"></span></div>
+    <div id="tableWrap">
+      <div class="table-empty">아직 분석 결과가 없습니다.</div>
+    </div>
+  </div>
+
+  <div class="module">
+    <div class="module-label">04 — 스펙트럼</div>
+    <div class="row" style="margin-bottom:10px;">
+      <div class="toggle-group">
+        <button class="toggle-btn active" id="btnRaw">스무딩 전</button><button class="toggle-btn" id="btnSmooth">스무딩 후</button>
+      </div>
+      <label class="field-label" style="margin-left:14px;">window</label>
+      <input type="number" id="smoothWindow" value="15" step="2" min="5" style="width:60px;">
+      <label class="field-label">order</label>
+      <input type="number" id="smoothOrder" value="3" step="1" min="1" max="5" style="width:50px;">
+      <span class="hint">(이 화면에만 적용 — 피크/FWHM 계산은 항상 원본 데이터 기준)</span>
+    </div>
+    <div class="row" style="margin-bottom:10px;">
+      <button class="switch-btn active" id="btnToggleFit">가우시안 피팅 표시</button>
+      <button class="switch-btn" id="btnToggleNorm">피크 높이 표준화</button>
+      <span class="hint">(표준화: 각 곡선을 자기 피크 높이로 나눠 피크가 모두 1이 되도록 — 분석 후 사용 가능, 화면 표시에만 적용)</span>
+    </div>
+    <div class="row" style="margin-bottom:10px;">
+      <label class="field-label">X축 범위</label>
+      <input type="number" id="axisXMin" placeholder="min" step="any" style="width:74px;">
+      <span style="color:var(--ink-soft);">~</span>
+      <input type="number" id="axisXMax" placeholder="max" step="any" style="width:74px;">
+      <label class="field-label" style="margin-left:14px;">Y축 범위</label>
+      <input type="number" id="axisYMin" placeholder="min" step="any" style="width:74px;">
+      <span style="color:var(--ink-soft);">~</span>
+      <input type="number" id="axisYMax" placeholder="max" step="any" style="width:74px;">
+      <button class="secondary" id="btnAxisReset">축 초기화</button>
+      <span class="hint">(비운 칸은 자동 범위 유지 — 한쪽만 입력해도 됩니다)</span>
+    </div>
+    <div id="plotArea"></div>
+  </div>
+
+</div>
+
+<script>
+const COLORS = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd",
+                "#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"];
+
+let datasets = []; // {id, name, wl:[], ab:[], color}
+let lastResults = []; // per analyzed dataset: {name,color,ok,result,wl,ab}
+let idCounter = 0;
+let analyzed = false;
+let smoothView = false; // false = 스무딩 전(원본), true = 스무딩 후
+let showFit = true;    // 가우시안 피팅 곡선 표시 여부
+let normPeak = false;  // 피크 높이 표준화 (피팅된 피크 높이 = 1)
+
+function displayY(d) {
+  if (!smoothView) return d.ab;
+  let win = parseInt(document.getElementById('smoothWindow').value, 10);
+  let order = parseInt(document.getElementById('smoothOrder').value, 10);
+  if (!Number.isFinite(win) || win < 5) win = 15;
+  if (win % 2 === 0) win += 1;
+  if (!Number.isFinite(order) || order < 1) order = 3;
+  if (order >= win) order = win - 2;
+  return sgSmooth(d.ab, d.wl, win, order);
+}
+
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const statusBox = document.getElementById('statusBox');
+const tableWrap = document.getElementById('tableWrap');
+const resultCount = document.getElementById('resultCount');
+
+document.getElementById('btnAdd').onclick = () => fileInput.click();
+document.getElementById('btnRemove').onclick = removeSelected;
+document.getElementById('btnClear').onclick = clearFiles;
+document.getElementById('btnAnalyze').onclick = runAnalysis;
+document.getElementById('btnSave').onclick = saveImage;
+
+document.getElementById('btnRaw').onclick = () => setSmoothView(false);
+document.getElementById('btnSmooth').onclick = () => setSmoothView(true);
+
+document.getElementById('btnToggleFit').onclick = () => {
+  showFit = !showFit;
+  document.getElementById('btnToggleFit').classList.toggle('active', showFit);
+  refreshPlot();
+};
+document.getElementById('btnToggleNorm').onclick = () => {
+  if (!analyzed) { showStatus('표준화는 분석 후에 사용할 수 있습니다. 먼저 분석을 실행해주세요.', 'warn'); return; }
+  normPeak = !normPeak;
+  document.getElementById('btnToggleNorm').classList.toggle('active', normPeak);
+  refreshPlot();
+};
+document.getElementById('smoothWindow').addEventListener('change', () => { if (smoothView) refreshPlot(); });
+document.getElementById('smoothOrder').addEventListener('change', () => { if (smoothView) refreshPlot(); });
+
+['axisXMin','axisXMax','axisYMin','axisYMax'].forEach(id => {
+  document.getElementById(id).addEventListener('change', refreshPlot);
+});
+document.getElementById('btnAxisReset').onclick = () => {
+  ['axisXMin','axisXMax','axisYMin','axisYMax'].forEach(id => document.getElementById(id).value = '');
+  refreshPlot();
+};
+
+// 플롯을 그린 뒤 사용자가 입력한 축 범위를 덧씌운다.
+// 자동 범위(autorange)로 먼저 그려지므로, 비운 칸은 자동 계산된 값이 유지된다.
+function applyAxisRanges() {
+  const val = id => {
+    const raw = document.getElementById(id).value.trim();
+    if (raw === '') return null;
+    const v = parseFloat(raw);
+    return Number.isFinite(v) ? v : null;
+  };
+  const update = {};
+  const xMin = val('axisXMin'), xMax = val('axisXMax');
+  const yMin = val('axisYMin'), yMax = val('axisYMax');
+  if (xMin != null) update['xaxis.range[0]'] = xMin;
+  if (xMax != null) update['xaxis.range[1]'] = xMax;
+  if (yMin != null) update['yaxis.range[0]'] = yMin;
+  if (yMax != null) update['yaxis.range[1]'] = yMax;
+  if (Object.keys(update).length) Plotly.relayout('plotArea', update);
+}
+
+function setSmoothView(v) {
+  smoothView = v;
+  document.getElementById('btnRaw').classList.toggle('active', !v);
+  document.getElementById('btnSmooth').classList.toggle('active', v);
+  refreshPlot();
+}
+function refreshPlot() {
+  if (analyzed) renderFitPlot(lastResults);
+  else renderPreview();
+}
+
+fileInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  const existingNames = new Set(datasets.map(d => d.name));
+  const errors = [], dups = [];
+  for (const f of files) {
+    if (existingNames.has(f.name)) { dups.push(f.name); continue; }
+    try {
+      const text = await f.text();
+      const {wl, ab} = parseSpectrum(text);
+      if (wl.length === 0) throw new Error('숫자 데이터 없음 (형식: 파장,흡광도)');
+      datasets.push({id: idCounter++, name: f.name, wl, ab, color: COLORS[datasets.length % COLORS.length], fitMin: null, fitMax: null});
+      existingNames.add(f.name);
+    } catch (err) {
+      errors.push(`${f.name}: ${err.message}`);
+    }
+  }
+  fileInput.value = '';
+  if (errors.length) showStatus('일부 파일 오류:\n' + errors.join('\n'), 'err');
+  else if (dups.length) showStatus('이미 추가된 파일: ' + dups.join(', '), 'warn');
+  else hideStatus();
+  refreshFileList();
+});
+
+function showStatus(msg, kind) {
+  statusBox.textContent = msg;
+  statusBox.className = 'status show' + (kind ? ' ' + kind : '');
+}
+function hideStatus() { statusBox.className = 'status'; }
+
+function removeSelected() {
+  const boxes = fileListEl.querySelectorAll('input[type=checkbox]:checked');
+  const idsToRemove = new Set(Array.from(boxes).map(b => Number(b.dataset.id)));
+  datasets = datasets.filter(d => !idsToRemove.has(d.id));
+  reassignColors();
+  refreshFileList();
+}
+function clearFiles() {
+  datasets = [];
+  refreshFileList();
+}
+function reassignColors() {
+  datasets.forEach((d, i) => d.color = COLORS[i % COLORS.length]);
+}
+
+function refreshFileList() {
+  analyzed = false;
+  // 분석 결과가 무효화되므로 피크 표준화도 해제
+  normPeak = false;
+  document.getElementById('btnToggleNorm').classList.remove('active');
+  fileListEl.innerHTML = '';
+  const hintEl = document.getElementById('fileListHint');
+  if (datasets.length === 0) {
+    fileListEl.innerHTML = '<div class="empty-note">추가된 파일이 없습니다.</div>';
+    hintEl.style.display = 'none';
+  } else {
+    hintEl.style.display = 'block';
+  }
+  datasets.forEach(d => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    row.innerHTML = `
+      <input type="checkbox" data-id="${d.id}">
+      <span class="swatch" style="background:${d.color}"></span>
+      <span class="fname">${d.name}</span>
+      <span style="color:var(--ink-soft);">${d.wl.length} pts</span>
+      <div class="range-inputs">
+        <input type="number" step="0.5" placeholder="min" value="${d.fitMin ?? ''}"
+               class="${d.fitMin != null ? 'overridden' : ''}"
+               oninput="updateFileRange(${d.id}, 'fitMin', this)">
+        <span class="range-sep">~</span>
+        <input type="number" step="0.5" placeholder="max" value="${d.fitMax ?? ''}"
+               class="${d.fitMax != null ? 'overridden' : ''}"
+               oninput="updateFileRange(${d.id}, 'fitMax', this)">
+      </div>
+    `;
+    fileListEl.appendChild(row);
+  });
+  renderPreview();
+  renderTable([]);
+}
+
+function updateFileRange(id, field, inputEl) {
+  const d = datasets.find(x => x.id === id);
+  if (!d) return;
+  const raw = inputEl.value.trim();
+  d[field] = raw === '' ? null : parseFloat(raw);
+  inputEl.classList.toggle('overridden', raw !== '' && !Number.isNaN(d[field]));
+}
+
+// ---------------- 데이터 파싱 ----------------
+function parseSpectrum(text) {
+  const wl = [], ab = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const parts = line.trim().split(',');
+    if (parts.length < 2) continue;
+    const x = parseFloat(parts[0]);
+    const y = parseFloat(parts[1]);
+    if (Number.isNaN(x) || Number.isNaN(y)) continue;
+    wl.push(x); ab.push(y);
+  }
+  return {wl, ab};
+}
+
+// ---------------- Savitzky-Golay (local polynomial LS) ----------------
+function linSolve(Ain, bin) {
+  const n = Ain.length;
+  const M = Ain.map((row, i) => row.concat([bin[i]]));
+  for (let col = 0; col < n; col++) {
+    let maxRow = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[maxRow][col])) maxRow = r;
+    [M[col], M[maxRow]] = [M[maxRow], M[col]];
+    if (Math.abs(M[col][col]) < 1e-14) M[col][col] = 1e-14;
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const factor = M[r][col] / M[col][col];
+      for (let c2 = col; c2 <= n; c2++) M[r][c2] -= factor * M[col][c2];
+    }
+  }
+  return M.map((row, i) => row[n] / row[i]);
+}
+function matInv(A) {
+  const n = A.length;
+  const cols = [];
+  for (let j = 0; j < n; j++) {
+    const e = new Array(n).fill(0); e[j] = 1;
+    cols.push(linSolve(A, e));
+  }
+  const inv = [];
+  for (let i = 0; i < n; i++) inv.push(cols.map(c => c[i]));
+  return inv;
+}
+
+function sgSmooth(y, x, window, order) {
+  const n = y.length;
+  const half = Math.floor(window / 2);
+  const out = new Array(n);
+  const m = order + 1;
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - half), hi = Math.min(n - 1, i + half);
+    const XtX = Array.from({length: m}, () => new Array(m).fill(0));
+    const XtY = new Array(m).fill(0);
+    for (let k = lo; k <= hi; k++) {
+      const dx = x[k] - x[i];
+      const row = new Array(m);
+      let p = 1;
+      for (let o = 0; o < m; o++) { row[o] = p; p *= dx; }
+      for (let a = 0; a < m; a++) {
+        XtY[a] += row[a] * y[k];
+        for (let b = 0; b < m; b++) XtX[a][b] += row[a] * row[b];
+      }
+    }
+    const beta = linSolve(XtX, XtY);
+    out[i] = beta[0];
+  }
+  return out;
+}
+
+function gradient(y, x) {
+  const n = y.length;
+  const d = new Array(n);
+  d[0] = (y[1] - y[0]) / (x[1] - x[0]);
+  d[n - 1] = (y[n - 1] - y[n - 2]) / (x[n - 1] - x[n - 2]);
+  for (let i = 1; i < n - 1; i++) d[i] = (y[i + 1] - y[i - 1]) / (x[i + 1] - x[i - 1]);
+  return d;
+}
+
+function findPeakCenter(wl, ab) {
+  const smooth = sgSmooth(ab, wl, 31, 3);
+  const d1 = gradient(smooth, wl);
+  const candidates = [];
+  for (let i = 0; i < d1.length - 1; i++) {
+    if (Math.sign(d1[i + 1]) - Math.sign(d1[i]) < 0) candidates.push(i);
+  }
+  if (candidates.length === 0) throw new Error('국소 최대(피크)를 찾지 못했습니다. 피팅 구간을 직접 입력하세요.');
+  let best = candidates[0], bestScore = -Infinity;
+  for (const i of candidates) {
+    const lo = smooth[Math.max(0, i - 100)];
+    const hi = smooth[Math.min(smooth.length - 1, i + 100)];
+    const score = smooth[i] - Math.min(lo, hi);
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  return wl[best];
+}
+
+// ---------------- 모델 & LM 피팅 ----------------
+function gaussianLinear(x, p) {
+  const [amp, center, sigma, slope, offset] = p;
+  return amp * Math.exp(-((x - center) ** 2) / (2 * sigma * sigma)) + slope * x + offset;
+}
+
+function levenbergMarquardt(x, y, f, p0, bounds, maxIter = 300) {
+  const m = p0.length, n = x.length;
+  function clamp(p) { return p.map((v, i) => Math.min(bounds.upper[i], Math.max(bounds.lower[i], v))); }
+  function residuals(p) { return x.map((xi, i) => y[i] - f(xi, p)); }
+  function chi2(p) { return residuals(p).reduce((s, v) => s + v * v, 0); }
+  function jacobian(p) {
+    const base = x.map(xi => f(xi, p));
+    const J = Array.from({length: n}, () => new Array(m));
+    for (let j = 0; j < m; j++) {
+      const h = 1e-6 * Math.max(1e-6, Math.abs(p[j]));
+      const p2 = p.slice(); p2[j] += h;
+      const f2 = x.map(xi => f(xi, p2));
+      for (let i = 0; i < n; i++) J[i][j] = (f2[i] - base[i]) / h;
+    }
+    return J;
+  }
+  let p = clamp(p0.slice());
+  let lambda = 1e-3;
+  let curChi2 = chi2(p);
+  for (let iter = 0; iter < maxIter; iter++) {
+    const J = jacobian(p);
+    const r = residuals(p);
+    const JtJ = Array.from({length: m}, () => new Array(m).fill(0));
+    const Jtr = new Array(m).fill(0);
+    for (let i = 0; i < n; i++) {
+      for (let a = 0; a < m; a++) {
+        Jtr[a] += J[i][a] * r[i];
+        for (let b = 0; b < m; b++) JtJ[a][b] += J[i][a] * J[i][b];
+      }
+    }
+    const A = JtJ.map((row, a) => row.map((v, b) => (a === b ? v * (1 + lambda) : v)));
+    let delta;
+    try { delta = linSolve(A, Jtr); } catch (e) { break; }
+    const pNew = clamp(p.map((v, i) => v + delta[i]));
+    const newChi2 = chi2(pNew);
+    if (newChi2 < curChi2) {
+      const improve = Math.abs(curChi2 - newChi2);
+      p = pNew;
+      const converged = improve < 1e-12 * Math.max(1, curChi2);
+      curChi2 = newChi2;
+      lambda = Math.max(lambda / 10, 1e-12);
+      if (converged) break;
+    } else {
+      lambda *= 10;
+      if (lambda > 1e12) break;
+    }
+  }
+  const Jf = jacobian(p);
+  const JtJf = Array.from({length: m}, () => new Array(m).fill(0));
+  for (let i = 0; i < n; i++) for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) JtJf[a][b] += Jf[i][a] * Jf[i][b];
+  const dof = Math.max(n - m, 1);
+  const sigma2 = curChi2 / dof;
+  let cov;
+  try { cov = matInv(JtJf).map(row => row.map(v => v * sigma2)); }
+  catch (e) { cov = Array.from({length: m}, () => new Array(m).fill(0)); }
+  return {p, cov, chi2: curChi2};
+}
+
+function singleGaussianFit(wl, ab, fitMin, fitMax, sigmaSeed, constraints) {
+  const idx0 = []; for (let i = 0; i < wl.length; i++) if (wl[i] >= fitMin && wl[i] <= fitMax) idx0.push(i);
+  if (idx0.length < 10) throw new Error('피팅 구간 안에 데이터가 너무 적습니다.');
+  const smoothWin = Math.min(31, idx0.length % 2 === 0 ? idx0.length - 1 : idx0.length);
+  let centerGuess;
+  if (idx0.length >= 11) {
+    const subWl = idx0.map(i => wl[i]), subAb = idx0.map(i => ab[i]);
+    const smoothSub = sgSmooth(subAb, subWl, Math.max(5, smoothWin), 3);
+    let maxI = 0; for (let i = 1; i < smoothSub.length; i++) if (smoothSub[i] > smoothSub[maxI]) maxI = i;
+    centerGuess = subWl[maxI];
+  } else {
+    centerGuess = (fitMin + fitMax) / 2;
+  }
+  const x = idx0.map(i => wl[i]), y = idx0.map(i => ab[i]);
+  const slope0 = (y[y.length - 1] - y[0]) / (x[x.length - 1] - x[0]);
+  const offset0 = y[0] - slope0 * x[0];
+  let maxYidx = 0; for (let i = 1; i < y.length; i++) if (y[i] > y[maxYidx]) maxYidx = i;
+  const amp0 = Math.max(y[maxYidx] - (slope0 * x[maxYidx] + offset0), 1e-4);
+  let sigma0 = sigmaSeed && Number.isFinite(sigmaSeed) ? sigmaSeed : 30.0;
+
+  // 데이터에서 미리 추정한 피크 위치/폭 제약 (있으면). 배경이 한쪽으로 급격히
+  // 무너지는 스펙트럼에서 피팅이 피크를 버리고 배경 경사면을 거대한 가우시안으로
+  // 잡아버리는 것을 막는다.
+  const cLo = constraints && Number.isFinite(constraints.centerLo) ? Math.max(x[0], constraints.centerLo) : x[0];
+  const cHi = constraints && Number.isFinite(constraints.centerHi) ? Math.min(x[x.length - 1], constraints.centerHi) : x[x.length - 1];
+  const sHi = constraints && Number.isFinite(constraints.sigmaHi)
+    ? Math.min(x[x.length - 1] - x[0], constraints.sigmaHi)
+    : (x[x.length - 1] - x[0]);
+  centerGuess = Math.min(cHi, Math.max(cLo, centerGuess));
+  sigma0 = Math.min(sigma0, sHi);
+
+  const p0 = [amp0, centerGuess, sigma0, slope0, offset0];
+  const bounds = {
+    lower: [0, cLo, 1, -Infinity, -Infinity],
+    upper: [Infinity, cHi, sHi, Infinity, Infinity]
+  };
+  const {p, cov} = levenbergMarquardt(x, y, gaussianLinear, p0, bounds);
+  const perr = cov.map((row, i) => Math.sqrt(Math.max(row[i], 0)));
+  const [amp, center, sigma, slope, offset] = p;
+  const fwhm = 2 * Math.sqrt(2 * Math.log(2)) * sigma;
+  const fwhmErr = 2 * Math.sqrt(2 * Math.log(2)) * perr[2];
+  const eLow = 1239.84 / (center + fwhm / 2);
+  const eHigh = 1239.84 / (center - fwhm / 2);
+  return {
+    popt: p, perr, center, centerErr: perr[1],
+    fwhm, fwhmErr, fwhmEv: eHigh - eLow,
+    fitRange: [fitMin, fitMax]
+  };
+}
+
+// ---------------- 데이터 기반 피크 사전 추정 ----------------
+// 스무딩한 데이터에서 피크 중심과 FWHM을 직접 추정한다 (반높이 교차점 방식).
+// 좌우 기준선(baseline)을 따로 잡기 때문에, 한쪽 배경이 흡수단(edge)처럼
+// 급격히 떨어지는 비대칭 스펙트럼에서도 실제 봉우리 폭을 대략 잡아낸다.
+// 실패하면 null 반환 → 기존 방식대로 진행.
+function estimatePeakShape(wl, ab, lo, hi) {
+  const idx = [];
+  for (let i = 0; i < wl.length; i++) if (wl[i] >= lo && wl[i] <= hi) idx.push(i);
+  if (idx.length < 15) return null;
+  const x = idx.map(i => wl[i]), yRaw = idx.map(i => ab[i]);
+  let win = Math.min(31, idx.length % 2 === 0 ? idx.length - 1 : idx.length);
+  const y = sgSmooth(yRaw, x, Math.max(5, win), 3);
+
+  // 전역 최대가 아니라 "두드러진 국소 최대"들을 피크 후보로 잡는다.
+  // 배경이 왼쪽 끝에서 더 높은 스펙트럼(감쇠 배경 위의 봉우리)에서
+  // 창 가장자리를 피크로 오인하는 것을 방지.
+  const d1 = gradient(y, x);
+  const cands = [];
+  for (let i = 0; i < d1.length - 1; i++) {
+    if (Math.sign(d1[i + 1]) - Math.sign(d1[i]) < 0) cands.push(i);
+  }
+  if (cands.length === 0) return null; // 창 안에 국소 최대 없음
+  // 두드러짐(prominence) 점수 순으로 정렬
+  const scored = cands.map(i => {
+    const lo = y[Math.max(0, i - 100)];
+    const hi = y[Math.min(y.length - 1, i + 100)];
+    return {i, score: y[i] - Math.min(lo, hi)};
+  }).sort((a, b) => b.score - a.score);
+
+  // 후보 하나에 대해 반높이 폭을 측정 (좌/우 기준선 따로)
+  function measure(p) {
+    if (p <= 0 || p >= y.length - 1) return null;
+    const pv = y[p];
+    let leftBase = Infinity, rightBase = Infinity;
+    for (let i = 0; i < p; i++) leftBase = Math.min(leftBase, y[i]);
+    for (let i = p + 1; i < y.length; i++) rightBase = Math.min(rightBase, y[i]);
+    if (!Number.isFinite(leftBase) || !Number.isFinite(rightBase)) return null;
+    const halfL = (pv + leftBase) / 2, halfR = (pv + rightBase) / 2;
+    let xL = null, xR = null;
+    for (let i = p; i > 0; i--) {
+      if (y[i - 1] < halfL && y[i] >= halfL) {
+        const t = (halfL - y[i - 1]) / (y[i] - y[i - 1]);
+        xL = x[i - 1] + t * (x[i] - x[i - 1]);
+        break;
+      }
+    }
+    for (let i = p; i < y.length - 1; i++) {
+      if (y[i + 1] < halfR && y[i] >= halfR) {
+        const t = (halfR - y[i + 1]) / (y[i] - y[i + 1]);
+        xR = x[i + 1] - t * (x[i + 1] - x[i]);
+        break;
+      }
+    }
+    let hl = xL != null ? x[p] - xL : null;
+    let hr = xR != null ? xR - x[p] : null;
+    if (hl == null && hr == null) return null;
+    if (hl == null) hl = hr; // 한쪽만 찾으면 대칭으로 가정
+    if (hr == null) hr = hl;
+    const fwhm = hl + hr;
+    if (!(fwhm > 0)) return null;
+    return {center: x[p], fwhm};
+  }
+
+  // 후보가 스파이크/스텝성인지 검사: 피크에서 10nm 지점까지 전체 높이의
+  // 30% 이상, 또는 25nm 지점까지 45% 이상 무너지면 아티팩트로 판정.
+  // 검출기 전환 스텝(피크 자리에서 몇 nm 떨어진 절벽 포함), 포화 스파이크,
+  // 좁은 노이즈 혹이 여기 걸린다. 폭 ~100nm급 실제 봉우리는 25nm 거리에서도
+  // 높이의 ~20% 이하로만 떨어진다. (부작용: 폭 ~55nm 미만의 진짜 피크도
+  // 걸러질 수 있음 — 그 경우 시작 구간을 좁게 직접 지정하면 기존 방식으로 피팅됨)
+  const SHARP_TESTS = [[10, 0.30], [25, 0.45]]; // [거리 nm, 허용 낙폭 비율]
+  function isSpiky(p) {
+    const pv = y[p];
+    let base = Infinity;
+    for (let i = 0; i < y.length; i++) if (i !== p) base = Math.min(base, y[i]);
+    const height = pv - base;
+    if (!(height > 0)) return true;
+    let checked = false;
+    for (const [dist, frac] of SHARP_TESTS) {
+      let j = p; while (j > 0 && x[p] - x[j] < dist) j--;
+      if (x[p] - x[j] >= dist) { checked = true; if ((pv - y[j]) / height > frac) return true; }
+      j = p; while (j < y.length - 1 && x[j] - x[p] < dist) j++;
+      if (x[j] - x[p] >= dist) { checked = true; if ((pv - y[j]) / height > frac) return true; }
+    }
+    return !checked; // 양쪽 다 확인 불가(창이 너무 좁음)면 신뢰 불가
+  }
+
+  // 점수 높은 순으로 훑으며 스파이크성 후보와 너무 좁은 후보(폭 < 15nm)는
+  // 건너뛰고 다음 후보를 본다. 진짜 봉우리는 보통 그 다음 순위에 있다.
+  const MIN_PEAK_WIDTH = 15; // nm
+  for (const c of scored) {
+    if (isSpiky(c.i)) continue;
+    const m = measure(c.i);
+    if (!m) continue;
+    if (m.fwhm < MIN_PEAK_WIDTH) continue;
+    return m;
+  }
+  return null;
+}
+
+// 구간을 스스로 조정해가며 수렴시키는 적응형 피팅.
+// 처음에 준 min/max(또는 자동 감지값)는 "출발점"일 뿐이고, 매 반복마다
+// 피팅된 중심±K*sigma로 구간을 다시 잡아 재피팅한다. 그러면 최초 시작
+// 구간을 살짝 다르게 잡아도 (같은 피크를 포함하는 한) 결국 같은 폭으로
+// 수렴하기 때문에 "구간 값을 바꿀 때마다 결과가 달라지는" 문제가 줄어든다.
+const ADAPT_K = 4;         // 반치폭 대비 구간 반폭 배수 (~1.7*FWHM)
+const ADAPT_MAX_ITER = 6;
+const ADAPT_TOL_NM = 1.0;  // 구간 경계 변화가 이 값보다 작으면 수렴으로 간주
+
+function fitFWHM(wl, ab, fitMinIn, fitMaxIn) {
+  const dataLo = wl[0], dataHi = wl[wl.length - 1];
+  let curMin = fitMinIn, curMax = fitMaxIn;
+  if (curMin == null || curMax == null) {
+    const centerGuess = findPeakCenter(wl, ab);
+    if (curMin == null) curMin = centerGuess - 110;
+    if (curMax == null) curMax = centerGuess + 110;
+  }
+  curMin = Math.max(curMin, dataLo);
+  curMax = Math.min(curMax, dataHi);
+
+  // 피팅 전에 데이터에서 피크 위치/폭을 직접 추정해서 시작 구간을 피크 주변으로
+  // 좁히고, 중심/폭에 상한을 건다. 흡수단처럼 배경이 한쪽으로 크게 무너지는
+  // 스펙트럼에서 가우시안이 봉우리 대신 경사면을 잡는 것을 방지.
+  let constraints = null, sigmaSeed = null;
+  const est = estimatePeakShape(wl, ab, curMin, curMax);
+  if (est) {
+    sigmaSeed = est.fwhm / 2.3548;
+    curMin = Math.max(curMin, est.center - 1.0 * est.fwhm);
+    curMax = Math.min(curMax, est.center + 1.0 * est.fwhm);
+    if (curMax - curMin < 10) { curMin = Math.max(dataLo, est.center - 20); curMax = Math.min(dataHi, est.center + 20); }
+    constraints = {
+      centerLo: est.center - 0.35 * est.fwhm,
+      centerHi: est.center + 0.35 * est.fwhm,
+      sigmaHi: 1.5 * est.fwhm / 2.3548
+    };
+  }
+
+  // 시작 구간(seed)을 기준으로 한 "허용 범위". 반복하면서 구간이 스스로 좁혀지는 건
+  // 허용하되, 사용자가(혹은 자동 감지가) 애초에 지정한 구간보다 더 넓게 벗어나지는
+  // 못하게 한다 — 그래야 반복 중에 엉뚱한 스파이크/아티팩트로 새거나, 약한 피크에서
+  // 결과가 시작값에 따라 크게 요동치는 걸 막을 수 있다.
+  const envLo = curMin, envHi = curMax;
+
+  let result = null, iterations = 0, converged = false;
+  for (let it = 0; it < ADAPT_MAX_ITER; it++) {
+    result = singleGaussianFit(wl, ab, curMin, curMax, sigmaSeed, constraints);
+    iterations = it + 1;
+    const sigma = result.popt[2], center = result.center;
+    sigmaSeed = sigma;
+    let newMin = Math.max(center - ADAPT_K * sigma, envLo);
+    let newMax = Math.min(center + ADAPT_K * sigma, envHi);
+    if (newMax - newMin < 10) { newMin = curMin; newMax = curMax; break; } // 안전장치
+    const stable = Math.abs(newMin - curMin) < ADAPT_TOL_NM && Math.abs(newMax - curMax) < ADAPT_TOL_NM;
+    curMin = newMin; curMax = newMax;
+    if (stable) { converged = true; break; }
+  }
+  result.iterations = iterations;
+  result.converged = converged;
+  result.seedRange = [fitMinIn, fitMaxIn];
+  // 피팅된 폭이 사전 추정 제약의 상한에 붙어버렸다면, 데이터가 가우시안+직선
+  // 모델과 안 맞는다는 신호 (대개 시작 구간이 피크 한쪽을 어중간하게 잘랐을 때).
+  result.sigmaCapped = !!(constraints && result.popt[2] >= constraints.sigmaHi * 0.995);
+
+  // 결정계수 R² (최종 피팅 구간 내) — 곡선이 데이터를 얼마나 잘 설명하는지
+  {
+    const [rl, rh] = result.fitRange;
+    let n = 0, meanY = 0;
+    for (let i = 0; i < wl.length; i++) if (wl[i] >= rl && wl[i] <= rh) { meanY += ab[i]; n++; }
+    meanY /= Math.max(n, 1);
+    let ssRes = 0, ssTot = 0;
+    for (let i = 0; i < wl.length; i++) {
+      if (wl[i] < rl || wl[i] > rh) continue;
+      ssRes += (ab[i] - gaussianLinear(wl[i], result.popt)) ** 2;
+      ssTot += (ab[i] - meanY) ** 2;
+    }
+    result.r2 = ssTot > 0 ? 1 - ssRes / ssTot : NaN;
+  }
+  return result;
+}
+
+// ---------------- 분석 실행 ----------------
+function runAnalysis() {
+  if (datasets.length === 0) { showStatus('먼저 파일을 추가해주세요.', 'warn'); return; }
+  const fitMinRaw = document.getElementById('fitMin').value.trim();
+  const fitMaxRaw = document.getElementById('fitMax').value.trim();
+  const fitMin = fitMinRaw === '' ? null : parseFloat(fitMinRaw);
+  const fitMax = fitMaxRaw === '' ? null : parseFloat(fitMaxRaw);
+  if ((fitMinRaw !== '' && Number.isNaN(fitMin)) || (fitMaxRaw !== '' && Number.isNaN(fitMax))) {
+    showStatus('피팅 구간은 숫자로 입력하세요.', 'err'); return;
+  }
+
+  const results = [];
+  const failed = [];
+  datasets.forEach(d => {
+    const effMin = d.fitMin != null ? d.fitMin : fitMin;
+    const effMax = d.fitMax != null ? d.fitMax : fitMax;
+    try {
+      const r = fitFWHM(d.wl, d.ab, effMin, effMax);
+      results.push({name: d.name, color: d.color, ok: true, wl: d.wl, ab: d.ab, r});
+    } catch (e) {
+      failed.push(`${d.name}: ${e.message}`);
+      results.push({name: d.name, color: d.color, ok: false, wl: d.wl, ab: d.ab});
+    }
+  });
+
+  lastResults = results;
+  analyzed = true;
+  renderFitPlot(results);
+  renderTable(results);
+
+  if (failed.length) showStatus('피팅 실패:\n' + failed.join('\n') + '\n\n피팅 구간을 직접 지정해 보세요.', 'err');
+  else showStatus(`분석 완료 (${results.length}개 파일).`, '');
+}
+
+// ---------------- 신뢰도 평가 ----------------
+// 피팅 진단값을 종합해 등급(높음/주의/낮음)과 사유를 만든다.
+function assessReliability(r) {
+  const relC = r.centerErr / Math.max(r.fwhm, 1e-6);
+  const relF = r.fwhmErr / Math.max(r.fwhm, 1e-6);
+  const reasons = [];
+  let level = 2; // 2=높음, 1=주의, 0=낮음
+
+  if (r.sigmaCapped) { level = 0; reasons.push('피팅 폭이 데이터 기반 상한에 걸림 — 시작 구간이 피크 한쪽을 자른 것일 수 있음'); }
+  if (relC > 0.1) { level = 0; reasons.push(`피크 중심 오차 큼 (FWHM 대비 ±${(relC * 100).toFixed(0)}%)`); }
+  if (relF > 0.3) { level = 0; reasons.push(`FWHM 오차 큼 (±${(relF * 100).toFixed(0)}%)`); }
+  if (Number.isFinite(r.r2) && r.r2 < 0.9) { level = 0; reasons.push(`적합도 낮음 (R²=${r.r2.toFixed(3)})`); }
+
+  if (level > 0) {
+    if (!r.converged) { level = 1; reasons.push('피팅 구간이 반복 한도 내에 완전히 안정되지 않음'); }
+    if (relC > 0.05) { level = Math.min(level, 1); reasons.push(`피크 중심 오차 다소 있음 (±${(relC * 100).toFixed(0)}%)`); }
+    if (relF > 0.15) { level = Math.min(level, 1); reasons.push(`FWHM 오차 다소 있음 (±${(relF * 100).toFixed(0)}%)`); }
+    if (Number.isFinite(r.r2) && r.r2 < 0.97) { level = Math.min(level, 1); reasons.push(`적합도 보통 (R²=${r.r2.toFixed(3)})`); }
+  }
+
+  const label = level === 2 ? '높음' : level === 1 ? '주의' : '낮음';
+  const color = level === 2 ? 'var(--accent)' : level === 1 ? 'var(--amber)' : 'var(--danger)';
+  const bg = level === 2 ? 'var(--accent-soft)' : level === 1 ? '#F7EBDA' : '#F6DFDA';
+  return {level, label, color, bg, reasons};
+}
+
+// ---------------- 표 렌더링 ----------------
+function renderTable(results) {
+  const ok = results.filter(r => r.ok);
+  resultCount.textContent = results.length ? `(${ok.length}/${results.length})` : '';
+  if (results.length === 0) {
+    tableWrap.innerHTML = '<div class="table-empty">아직 분석 결과가 없습니다.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>파일명</th><th>피크 중심 (nm)</th><th>피크 (eV)</th><th>FWHM (nm)</th><th>FWHM (meV)</th><th>사용된 구간 (nm)</th><th>신뢰도</th>
+  </tr></thead><tbody>`;
+  results.forEach(res => {
+    if (!res.ok) {
+      html += `<tr><td style="text-align:left;">${res.name}</td><td colspan="6" style="color:var(--danger);">피팅 실패</td></tr>`;
+      return;
+    }
+    const r = res.r;
+    const rel = assessReliability(r);
+
+    const rangeLabel = `${r.fitRange[0].toFixed(0)} ~ ${r.fitRange[1].toFixed(0)}`;
+    const rangeCell = r.converged
+      ? `<span style="color:var(--accent);">${rangeLabel}</span>`
+      : `<span style="color:var(--amber);" title="반복 한도 내에 구간이 완전히 안정되지 않음">${rangeLabel} *</span>`;
+
+    const r2Label = Number.isFinite(r.r2) ? `R²=${r.r2.toFixed(3)}` : '';
+    const tooltip = (rel.reasons.length ? rel.reasons.join(' · ') : '모든 진단 통과') + (r2Label ? ` · ${r2Label}` : '');
+    const relCell = `<span title="${tooltip}" style="display:inline-block;padding:2px 8px;font-weight:600;color:${rel.color};background:${rel.bg};border:1px solid ${rel.color};cursor:help;">${rel.label}</span>
+      <span style="color:var(--ink-soft);font-size:10.5px;display:block;margin-top:2px;">${r2Label}</span>`;
+
+    html += `<tr${rel.level === 0 ? ' style="background:#FCEFEA;"' : ''}>
+      <td style="text-align:left;"><span class="swatch" style="background:${res.color};display:inline-block;vertical-align:middle;margin-right:6px;"></span>${res.name}</td>
+      <td>${r.center.toFixed(2)} ± ${r.centerErr.toFixed(2)}</td>
+      <td>${(1239.84 / r.center).toFixed(4)}</td>
+      <td>${r.fwhm.toFixed(2)} ± ${r.fwhmErr.toFixed(2)}</td>
+      <td>${(r.fwhmEv * 1000).toFixed(1)}</td>
+      <td>${rangeCell}</td>
+      <td>${relCell}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  tableWrap.innerHTML = html;
+
+  const anyUnconverged = ok.some(res => res.r && !res.r.converged);
+  const anyNotHigh = ok.some(res => res.r && assessReliability(res.r).level < 2);
+  let footNotes = '';
+  if (anyUnconverged) footNotes += '* 표시: 구간이 반복 한도 내에 완전히 안정되지 않았습니다.<br>';
+  if (anyNotHigh) footNotes += '신뢰도 배지에 마우스를 올리면 상세 사유가 표시됩니다. "낮음"이면 시작 구간이 피크 한쪽을 어중간하게 자르지 않았는지(특히 파일별 min~max 칸) 확인하고, 피크 양쪽 꼬리가 다 들어오게 구간을 잡아 다시 시도해보세요.';
+  if (footNotes) tableWrap.innerHTML += `<div class="hint" style="margin-top:6px;">${footNotes}</div>`;
+}
+
+// ---------------- 플롯: 미리보기 (원본만) ----------------
+function renderPreview() {
+  if (datasets.length === 0) {
+    Plotly.purge('plotArea');
+    return;
+  }
+  const traces = datasets.map(d => ({
+    x: d.wl, y: displayY(d), mode: 'lines', name: d.name,
+    line: {color: d.color, width: 1}
+  }));
+  const title = smoothView ? '스무딩 후 미리보기' : '원본 데이터 미리보기 (스무딩 전)';
+  Plotly.newPlot('plotArea', traces, baseLayout(title), plotConfig()).then(applyAxisRanges);
+}
+
+// ---------------- 플롯: 분석 결과 ----------------
+function renderFitPlot(results) {
+  const traces = [];
+  const shapes = [];
+  const single = results.length === 1;
+
+  results.forEach(res => {
+    const {name, color, wl, ab} = res;
+    if (!res.ok) {
+      traces.push({x: wl, y: displayY(res), mode: 'lines', name: `${name} (피팅 실패)`,
+                   line: {color, width: 1}, opacity: showFit ? 0.5 : 1});
+      return;
+    }
+    const r = res.r;
+    const [amp, center, sigma, slope, offset] = r.popt;
+
+    // 피크 높이 표준화: 피팅된 곡선의 피크 중심 높이(배경 포함)가 1이 되도록 나눈다.
+    let s = 1;
+    if (normPeak) {
+      const peakH = gaussianLinear(center, r.popt);
+      if (Number.isFinite(peakH) && peakH > 0) s = 1 / peakH;
+    }
+
+    const [xlo, xhi] = r.fitRange;
+    const xf = linspace(xlo, xhi, 400);
+    const dataY = displayY(res).map(v => v * s);
+
+    if (showFit) {
+      const fitY = xf.map(xx => gaussianLinear(xx, r.popt) * s);
+      const gaussOnly = xf.map(xx => amp * s * Math.exp(-((xx - center) ** 2) / (2 * sigma * sigma)));
+
+      // 원본 또는 스무딩 (반투명, 범례 없음) — 계산에는 영향 없음, 시각화 전용
+      traces.push({x: wl, y: dataY, mode: 'lines', showlegend: false,
+                   line: {color, width: 1}, opacity: 0.35, hoverinfo: 'skip'});
+
+      // 전체 피팅 (진한 실선, 범례에 값 표시)
+      traces.push({
+        x: xf, y: fitY, mode: 'lines',
+        name: `${name}  (${center.toFixed(1)} nm, FWHM ${r.fwhm.toFixed(1)} nm)`,
+        line: {color, width: 2.2}
+      });
+
+      // 배경 제거한 가우시안 성분 (점선 + 채움)
+      traces.push({
+        x: xf, y: gaussOnly, mode: 'lines', showlegend: false,
+        line: {color, width: 1.3, dash: 'dash'},
+        fill: 'tozeroy', fillcolor: hexToRgba(color, 0.10), hoverinfo: 'skip'
+      });
+
+      shapes.push({
+        type: 'line', x0: center, x1: center, yref: 'paper', y0: 0, y1: 1,
+        line: {color, width: 1, dash: 'dot'}
+      });
+
+      if (single) {
+        const half = (slope * center + offset + amp / 2) * s;
+        shapes.push({
+          type: 'line', x0: center - r.fwhm / 2, x1: center + r.fwhm / 2, y0: half, y1: half,
+          line: {color: '#000', width: 1.2, dash: 'dash'}
+        });
+      }
+    } else {
+      // 데이터만 표시 (피팅 숨김) — 진하게, 범례에 값 표시
+      traces.push({
+        x: wl, y: dataY, mode: 'lines',
+        name: `${name}  (${center.toFixed(1)} nm, FWHM ${r.fwhm.toFixed(1)} nm)`,
+        line: {color, width: 1.4}
+      });
+    }
+  });
+
+  let title = single ? results[0].name.replace(/\.[^/.]+$/, '') : 'Gaussian FWHM fit';
+  if (smoothView) title += '  (스무딩 후 보기)';
+  if (normPeak) title += '  (피크 표준화)';
+  const layout = baseLayout(title);
+  if (normPeak) layout.yaxis.title = 'Normalized absorbance';
+  layout.shapes = shapes;
+  Plotly.newPlot('plotArea', traces, layout, plotConfig()).then(applyAxisRanges);
+}
+
+function baseLayout(title) {
+  return {
+    title: {text: title, font: {size: 13, family: "'IBM Plex Mono', monospace"}},
+    xaxis: {title: 'Wavelength (nm)', gridcolor: '#EDEFEC', zeroline: false},
+    yaxis: {title: 'Absorbance', gridcolor: '#EDEFEC', zeroline: false},
+    font: {family: "'IBM Plex Sans', sans-serif", size: 11, color: '#122023'},
+    legend: {font: {size: 10}},
+    margin: {t: 40, l: 55, r: 20, b: 45},
+    paper_bgcolor: '#fff', plot_bgcolor: '#fff'
+  };
+}
+function plotConfig() {
+  return {responsive: true, displaylogo: false,
+          modeBarButtonsToRemove: ['lasso2d', 'select2d']};
+}
+function linspace(a, b, n) {
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = a + (b - a) * i / (n - 1);
+  return out;
+}
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ---------------- 이미지 저장 ----------------
+function saveImage() {
+  if (!analyzed) { showStatus('먼저 분석을 실행해주세요.', 'warn'); return; }
+  const filename = (datasets.length === 1)
+    ? datasets[0].name.replace(/\.[^/.]+$/, '') + '_fwhm'
+    : 'fwhm_batch';
+  Plotly.downloadImage('plotArea', {format: 'jpeg', filename, width: 1200, height: 650, scale: 2});
+}
+
+refreshFileList();
+</script>
+</body>
+</html>
