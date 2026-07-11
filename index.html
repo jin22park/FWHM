@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>가우시안 FWHM 분석기</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --panel:#EEF1EF;
@@ -256,13 +257,14 @@
     <div class="module-label">01 — 파일</div>
     <div class="row">
       <button id="btnAdd">파일 추가</button>
-      <input type="file" id="fileInput" accept=".txt,.csv" multiple>
+      <input type="file" id="fileInput" accept=".txt,.csv,.xlsx,.xls" multiple>
       <label class="field-label" style="margin-left:14px;">피크 탐색 구간(nm)</label>
       <input type="number" id="fitMin" placeholder="min" step="0.5">
       <span style="color:var(--ink-soft);">~</span>
       <input type="number" id="fitMax" placeholder="max" step="0.5">
       <span class="hint">(분석할 피크가 들어있는 대략적 범위 — 여기서 피크를 찾은 뒤, 실제 피팅 창은 피크 중심 ± ΔE(eV)로 자동 설정됩니다. 비우면 전체에서 자동 감지)</span>
     </div>
+    <div class="hint" style="margin-top:6px;">엑셀 파일(.xlsx/.xls)은 시트 안 열 쌍(A·B열=데이터1, C·D열=데이터2 ...)을 각각 하나의 데이터로 읽습니다. 각 쌍의 첫 행이 숫자가 아니면 이름(헤더)으로 사용합니다.</div>
     <div class="filelist" id="fileList"></div>
     <div class="hint" id="fileListHint" style="margin-top:6px; display:none;">
       파일 옆 min~max 칸은 그 파일만의 "피크 탐색 구간"입니다 (피크를 어디서 찾을지). 실제 피팅 창은 모든 파일 동일하게 피크 중심 ± ΔE(eV)로 자동 설정되므로, 이 칸은 엉뚱한 피크(아티팩트)를 잡을 때만 좁혀주면 됩니다. 비워두면 위 기본 탐색 구간(또는 자동 감지)을 따릅니다.
@@ -443,14 +445,30 @@ fileInput.addEventListener('change', async (e) => {
   const files = Array.from(e.target.files);
   const existingNames = new Set(datasets.map(d => d.name));
   const errors = [], dups = [];
+
+  function addDataset(name, wl, ab) {
+    let finalName = name;
+    let n = 2;
+    while (existingNames.has(finalName)) finalName = `${name} (${n++})`;
+    datasets.push({id: idCounter++, name: finalName, wl, ab, color: COLORS[datasets.length % COLORS.length], fitMin: null, fitMax: null});
+    existingNames.add(finalName);
+  }
+
   for (const f of files) {
-    if (existingNames.has(f.name)) { dups.push(f.name); continue; }
+    const isExcel = /\.xlsx?$/i.test(f.name);
+    if (!isExcel && existingNames.has(f.name)) { dups.push(f.name); continue; }
     try {
-      const text = await f.text();
-      const {wl, ab} = parseSpectrum(text);
-      if (wl.length === 0) throw new Error('숫자 데이터 없음 (형식: 파장,흡광도)');
-      datasets.push({id: idCounter++, name: f.name, wl, ab, color: COLORS[datasets.length % COLORS.length], fitMin: null, fitMax: null});
-      existingNames.add(f.name);
+      if (isExcel) {
+        const buf = await f.arrayBuffer();
+        const entries = parseExcelFile(buf, f.name);
+        if (entries.length === 0) throw new Error('숫자 데이터로 된 열 쌍을 찾지 못했습니다.');
+        entries.forEach(({name, wl, ab}) => addDataset(name, wl, ab));
+      } else {
+        const text = await f.text();
+        const {wl, ab} = parseSpectrum(text);
+        if (wl.length === 0) throw new Error('숫자 데이터 없음 (형식: 파장,흡광도)');
+        addDataset(f.name, wl, ab);
+      }
     } catch (err) {
       errors.push(`${f.name}: ${err.message}`);
     }
@@ -541,6 +559,51 @@ function parseSpectrum(text) {
     wl.push(x); ab.push(y);
   }
   return {wl, ab};
+}
+
+// ---------------- 엑셀 파싱 ----------------
+// 워크북의 각 시트를 읽어, 시트 안 열 쌍(A,B / C,D / E,F ...)마다 하나의
+// 데이터셋을 뽑아낸다. 쌍의 첫 행이 숫자가 아니면(문자열/빈칸) 헤더로 보고
+// 그 값을 데이터 이름으로 쓰며 실제 데이터는 다음 행부터 읽는다.
+function parseExcelFile(arrayBuffer, fileName) {
+  const wb = XLSX.read(arrayBuffer, {type: 'array'});
+  const baseName = fileName.replace(/\.[^/.]+$/, '');
+  const multiSheet = wb.SheetNames.length > 1;
+  const entries = [];
+
+  wb.SheetNames.forEach(sheetName => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header: 1, defval: '', raw: true});
+    if (rows.length === 0) return;
+    const maxCols = rows.reduce((m, row) => Math.max(m, row.length), 0);
+    const pairCount = Math.floor(maxCols / 2);
+    const sheetLabel = multiSheet ? `${baseName}::${sheetName}` : baseName;
+
+    for (let p = 0; p < pairCount; p++) {
+      const colA = p * 2, colB = p * 2 + 1;
+      const toNum = v => {
+        if (typeof v === 'number') return v;
+        if (typeof v === 'string' && v.trim() !== '') return parseFloat(v);
+        return NaN;
+      };
+      const first = rows[0] || [];
+      const firstIsHeader = Number.isNaN(toNum(first[colA])) || Number.isNaN(toNum(first[colB]));
+      let name = pairCount > 1 ? `${sheetLabel} #${p + 1}` : sheetLabel;
+      if (firstIsHeader) {
+        const label = (first[colA] ?? '').toString().trim() || (first[colB] ?? '').toString().trim();
+        if (label) name = label;
+      }
+
+      const wl = [], ab = [];
+      for (let r = firstIsHeader ? 1 : 0; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const x = toNum(row[colA]), y = toNum(row[colB]);
+        if (Number.isNaN(x) || Number.isNaN(y)) continue;
+        wl.push(x); ab.push(y);
+      }
+      if (wl.length > 0) entries.push({name, wl, ab});
+    }
+  });
+  return entries;
 }
 
 // ---------------- Savitzky-Golay (local polynomial LS) ----------------
