@@ -264,7 +264,7 @@
       <input type="number" id="fitMax" placeholder="max" step="0.5">
       <span class="hint">(분석할 피크가 들어있는 대략적 범위 — 여기서 피크를 찾은 뒤, 실제 피팅 창은 피크 중심 ± ΔE(eV)로 자동 설정됩니다. 비우면 전체에서 자동 감지)</span>
     </div>
-    <div class="hint" style="margin-top:6px;">엑셀 파일(.xlsx/.xls)은 시트 안 열 쌍(A·B열=데이터1, C·D열=데이터2 ...)을 각각 하나의 데이터로 읽습니다. 각 쌍의 첫 행이 숫자가 아니면 이름(헤더)으로 사용합니다.</div>
+    <div class="hint" style="margin-top:6px;">엑셀 파일(.xlsx/.xls)은 두 형식을 자동 인식합니다: ① A열=공통 파장, B열부터 각 열이 데이터 하나 ② 열 쌍(A·B=데이터1, C·D=데이터2 ...). 첫 행이 숫자가 아니면 이름(헤더)으로 사용합니다.</div>
     <div class="filelist" id="fileList"></div>
     <div class="hint" id="fileListHint" style="margin-top:6px; display:none;">
       파일 옆 min~max 칸은 그 파일만의 "피크 탐색 구간"입니다 (피크를 어디서 찾을지). 실제 피팅 창은 모든 파일 동일하게 피크 중심 ± ΔE(eV)로 자동 설정되므로, 이 칸은 엉뚱한 피크(아티팩트)를 잡을 때만 좁혀주면 됩니다. 비워두면 위 기본 탐색 구간(또는 자동 감지)을 따릅니다.
@@ -562,45 +562,86 @@ function parseSpectrum(text) {
 }
 
 // ---------------- 엑셀 파싱 ----------------
-// 워크북의 각 시트를 읽어, 시트 안 열 쌍(A,B / C,D / E,F ...)마다 하나의
-// 데이터셋을 뽑아낸다. 쌍의 첫 행이 숫자가 아니면(문자열/빈칸) 헤더로 보고
-// 그 값을 데이터 이름으로 쓰며 실제 데이터는 다음 행부터 읽는다.
+// 시트마다 두 가지 레이아웃을 자동 판별해서 읽는다.
+//   1) 공유 x + 여러 y: A열=파장(공통), B열부터 각 열이 하나의 데이터
+//   2) 열 쌍: (A,B)=데이터1, (C,D)=데이터2, (E,F)=데이터3 ...
+// 판별 기준: A열은 보통 단조증가/감소(파장)다. 열 쌍 형식이면 C열도
+// 마찬가지로 단조(또다른 파장 배열)여야 한다. C열이 단조가 아니면(굴곡
+// 있는 세기/흡광도 값이면) 공유 x 형식으로 본다.
+// 첫 행에 숫자 아닌 값이 하나라도 있으면 헤더 행으로 보고 이름으로 쓴다.
 function parseExcelFile(arrayBuffer, fileName) {
   const wb = XLSX.read(arrayBuffer, {type: 'array'});
   const baseName = fileName.replace(/\.[^/.]+$/, '');
   const multiSheet = wb.SheetNames.length > 1;
   const entries = [];
 
+  const toNum = v => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string' && v.trim() !== '') return parseFloat(v);
+    return NaN;
+  };
+
+  function isMonotonicCol(rows, col, startRow) {
+    let inc = 0, dec = 0, cnt = 0, prev = null;
+    for (let r = startRow; r < rows.length; r++) {
+      const v = toNum((rows[r] || [])[col]);
+      if (Number.isNaN(v)) continue;
+      if (prev != null) { if (v > prev) inc++; else if (v < prev) dec++; cnt++; }
+      prev = v;
+    }
+    if (cnt < 3) return false;
+    return inc / cnt >= 0.9 || dec / cnt >= 0.9;
+  }
+
   wb.SheetNames.forEach(sheetName => {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header: 1, defval: '', raw: true});
     if (rows.length === 0) return;
     const maxCols = rows.reduce((m, row) => Math.max(m, row.length), 0);
-    const pairCount = Math.floor(maxCols / 2);
+    if (maxCols < 2) return;
     const sheetLabel = multiSheet ? `${baseName}::${sheetName}` : baseName;
 
-    for (let p = 0; p < pairCount; p++) {
-      const colA = p * 2, colB = p * 2 + 1;
-      const toNum = v => {
-        if (typeof v === 'number') return v;
-        if (typeof v === 'string' && v.trim() !== '') return parseFloat(v);
-        return NaN;
-      };
-      const first = rows[0] || [];
-      const firstIsHeader = Number.isNaN(toNum(first[colA])) || Number.isNaN(toNum(first[colB]));
-      let name = pairCount > 1 ? `${sheetLabel} #${p + 1}` : sheetLabel;
-      if (firstIsHeader) {
-        const label = (first[colA] ?? '').toString().trim() || (first[colB] ?? '').toString().trim();
-        if (label) name = label;
-      }
+    const first = rows[0] || [];
+    const firstRowIsHeader = first.slice(0, maxCols).some(v => v !== '' && Number.isNaN(toNum(v)));
+    const dataStart = firstRowIsHeader ? 1 : 0;
 
-      const wl = [], ab = [];
-      for (let r = firstIsHeader ? 1 : 0; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const x = toNum(row[colA]), y = toNum(row[colB]);
-        if (Number.isNaN(x) || Number.isNaN(y)) continue;
-        wl.push(x); ab.push(y);
+    const col0Monotonic = isMonotonicCol(rows, 0, dataStart);
+    const col2Monotonic = maxCols > 2 ? isMonotonicCol(rows, 2, dataStart) : true;
+    const sharedX = col0Monotonic && !col2Monotonic;
+
+    if (sharedX) {
+      for (let c = 1; c < maxCols; c++) {
+        let name = maxCols > 2 ? `${sheetLabel} #${c}` : sheetLabel;
+        if (firstRowIsHeader) {
+          const label = (first[c] ?? '').toString().trim();
+          if (label) name = label;
+        }
+        const wl = [], ab = [];
+        for (let r = dataStart; r < rows.length; r++) {
+          const row = rows[r] || [];
+          const x = toNum(row[0]), y = toNum(row[c]);
+          if (Number.isNaN(x) || Number.isNaN(y)) continue;
+          wl.push(x); ab.push(y);
+        }
+        if (wl.length > 0) entries.push({name, wl, ab});
       }
-      if (wl.length > 0) entries.push({name, wl, ab});
+    } else {
+      const pairCount = Math.floor(maxCols / 2);
+      for (let p = 0; p < pairCount; p++) {
+        const colA = p * 2, colB = p * 2 + 1;
+        let name = pairCount > 1 ? `${sheetLabel} #${p + 1}` : sheetLabel;
+        if (firstRowIsHeader) {
+          const label = (first[colA] ?? '').toString().trim() || (first[colB] ?? '').toString().trim();
+          if (label) name = label;
+        }
+        const wl = [], ab = [];
+        for (let r = dataStart; r < rows.length; r++) {
+          const row = rows[r] || [];
+          const x = toNum(row[colA]), y = toNum(row[colB]);
+          if (Number.isNaN(x) || Number.isNaN(y)) continue;
+          wl.push(x); ab.push(y);
+        }
+        if (wl.length > 0) entries.push({name, wl, ab});
+      }
     }
   });
   return entries;
